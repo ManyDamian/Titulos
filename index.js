@@ -2,6 +2,12 @@ import express from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
+import { PDFDocument } from 'pdf-lib';
+import QRCode from 'qrcode';
+import { pdf } from "pdf-to-img";
+import { Jimp } from 'jimp';
+import jsQR from 'jsqr';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { promisify } from 'util';
@@ -42,7 +48,7 @@ const formatearFecha = (fechaStr) => {
     return fechaStr;
 };
 
-// 1. CONVERSIÓN MEJORADA (Protección contra bloqueos y perfiles)
+// 1. CONVERSIÓN MEJORADA (Rutas ajustadas para Raspberry Pi)
 const convertToPdf = async (inputPath, outputDir) => {
     const isWindows = process.platform === "win32";
     
@@ -82,6 +88,7 @@ app.post('/generar-titulo', upload.fields([
     const outputDir = os.tmpdir();
     
     const tempDocxPath = path.resolve(outputDir, `Doc_${Date.now()}.docx`);
+    const imagenTempQR = path.resolve(outputDir, `qr_${Date.now()}.png`);
     let pdfGeneradoPath = null;
 
     try {
@@ -159,13 +166,13 @@ app.post('/generar-titulo', upload.fields([
                 "Carrera": limpiar(lCarrera[0] || ""),
                 "ClaveCarrera": limpiar(lCarrera[1] || ""),
                 "Fechas Inicio": lFechas[0] || "",
-                "Fechas Fin": formatearFecha(lFechas[1]),          // <-- Aplicado aquí
-                "Fechas Examen": formatearFecha(lFechas[2]),       // <-- Aplicado aquí
+                "Fechas Fin": formatearFecha(lFechas[1]),          // Aplicado
+                "Fechas Examen": formatearFecha(lFechas[2]),       // Aplicado
                 "Institución": limpiar(lines[5]),
                 "ClaveInst": lClaves[0] || "",
                 "Autorización": lClaves[1] || "",
                 "Entidad": lEntidad[0] || "",
-                "Fecha de Expedición": formatearFecha(lEntidad[1]) // <-- Aplicado aquí
+                "Fecha de Expedición": formatearFecha(lEntidad[1]) // Aplicado
             };
 
             lines.forEach((linea) => {
@@ -188,24 +195,45 @@ app.post('/generar-titulo', upload.fields([
             });
         }
 
-        // 4. LLENADO DEL DOCX
+        // 4. LECTURA DE QR Y LLENADO DEL DOCX
+        const pdfImgConv = await pdf(pdfEntradaPath, { scale: 4 });
+        for await (const imagen of pdfImgConv) {
+            fs.writeFileSync(imagenTempQR, imagen);
+            break; 
+        }
+        const imgParaQR = await Jimp.read(imagenTempQR);
+        const qrLeido = jsQR(new Uint8ClampedArray(imgParaQR.bitmap.data), imgParaQR.bitmap.width, imgParaQR.bitmap.height);
+        
         const zip = new PizZip(fs.readFileSync(plantillaPath, 'binary'));
         const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
         doc.render(datosExtraidos);
         fs.writeFileSync(tempDocxPath, doc.getZip().generate({ type: 'nodebuffer' }));
 
-        // 5. CONVERSIÓN A PDF Y ENVÍO DIRECTO
         pdfGeneradoPath = await convertToPdf(tempDocxPath, outputDir);
 
+        // 5. ESTAMPADO FINAL DEL CÓDIGO QR EN EL PDF
+        const pdfBytes = fs.readFileSync(pdfGeneradoPath);
+        const pdfDocFinal = await PDFDocument.load(pdfBytes);
+        const qrBuffer = await QRCode.toBuffer(qrLeido?.data || "Error", { margin: 1, errorCorrectionLevel: 'H' });
+        const qrImage = await pdfDocFinal.embedPng(qrBuffer);
+        
+        const { height: pageHeight } = pdfDocFinal.getPages()[0].getSize();
+        pdfDocFinal.getPages()[0].drawImage(qrImage, {
+            x: 301 / 4,
+            y: pageHeight - (2216 / 4) - ((2032 - 1616) / 4),
+            width: (695 - 308) / 4,
+            height: (2032 - 1616) / 4,
+        });
+
         res.setHeader('Content-Type', 'application/pdf');
-        res.send(fs.readFileSync(pdfGeneradoPath));
+        res.send(Buffer.from(await pdfDocFinal.save()));
 
     } catch (error) {
         console.error("ERROR:", error.message);
         res.status(500).send('Error procesando el documento.');
     } finally {
-        // Limpieza robusta de los archivos temporales generados
-        [pdfEntradaPath, plantillaPath, tempDocxPath, pdfGeneradoPath].forEach(p => {
+        // Limpieza de TODOS los temporales (incluyendo la imagen del QR y el PDF intermedio)
+        [pdfEntradaPath, plantillaPath, tempDocxPath, imagenTempQR, pdfGeneradoPath].forEach(p => {
             if (p && fs.existsSync(p)) fs.unlinkSync(p);
         });
     }
