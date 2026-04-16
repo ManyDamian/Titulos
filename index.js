@@ -2,12 +2,6 @@ import express from 'express';
 import multer from 'multer';
 import fs from 'fs';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import { PDFDocument } from 'pdf-lib';
-import QRCode from 'qrcode';
-import { pdf } from "pdf-to-img";
-import { Jimp } from 'jimp';
-import jsQR from 'jsqr';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
 import { promisify } from 'util';
@@ -20,17 +14,41 @@ const pdfjsLib = await import('pdfjs-dist/legacy/build/pdf.mjs');
 const app = express();
 const upload = multer({ dest: os.tmpdir() }); 
 
+// Función auxiliar para transformar fechas a texto (Ej: 10 de mayo del 2026)
+const formatearFecha = (fechaStr) => {
+    if (!fechaStr) return "";
+
+    let dia, mes, anio;
+    // Detectamos si viene en formato YYYY-MM-DD o DD/MM/YYYY
+    if (fechaStr.includes("-")) {
+        [anio, mes, dia] = fechaStr.split("-");
+    } else if (fechaStr.includes("/")) {
+        [dia, mes, anio] = fechaStr.split("/");
+    } else {
+        return fechaStr; // Si no coincide, devolvemos el valor original por seguridad
+    }
+
+    const meses = [
+        "enero", "febrero", "marzo", "abril", "mayo", "junio",
+        "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+    ];
+
+    const mesIndex = parseInt(mes, 10) - 1;
+    if (mesIndex >= 0 && mesIndex < 12) {
+        // parseInt(dia, 10) quita el "0" inicial de los días del 1 al 9
+        return `${parseInt(dia, 10)} de ${meses[mesIndex]} del ${anio}`;
+    }
+    
+    return fechaStr;
+};
+
 // 1. CONVERSIÓN MEJORADA (Protección contra bloqueos y perfiles)
 const convertToPdf = async (inputPath, outputDir) => {
     const isWindows = process.platform === "win32";
     
-    // Definimos la ruta del ejecutable según el sistema
-    // En la Raspi, el binario suele estar en /lib/libreoffice/program/soffice
     const libreOfficePath = isWindows 
         ? `"C:\\Program Files\\LibreOffice\\program\\soffice.exe"` 
-        : "/usr/bin/libreoffice"; // O la ruta directa: "/lib/libreoffice/program/soffice"
-
-    // Nota: Si '/usr/bin/libreoffice' no funciona, cámbialo por '/lib/libreoffice/program/soffice'
+        : "/usr/bin/libreoffice"; 
     
     const command = isWindows 
         ? `${libreOfficePath} --headless "-env:UserInstallation=file:///${os.tmpdir().replace(/\\/g, '/')}/libre_profile_${Date.now()}" --convert-to pdf "${inputPath}" --outdir "${outputDir}"`
@@ -64,7 +82,7 @@ app.post('/generar-titulo', upload.fields([
     const outputDir = os.tmpdir();
     
     const tempDocxPath = path.resolve(outputDir, `Doc_${Date.now()}.docx`);
-    const imagenTempQR = path.resolve(outputDir, `qr_${Date.now()}.png`);
+    let pdfGeneradoPath = null;
 
     try {
         const data = new Uint8Array(fs.readFileSync(pdfEntradaPath));
@@ -107,14 +125,11 @@ app.post('/generar-titulo', upload.fields([
             } 
             else if (line.startsWith("Fecha y hora de sellado")) {
                 let fullFecha = line;
-                // BUCLE MEJORADO: Continúa uniendo líneas hasta que encuentre el patrón de hora XX:XX:XX
                 while (j + 1 < rawLines.length && !/\d{2}:\d{2}:\d{2}/.test(fullFecha)) {
                     let nextLine = rawLines[j + 1].trim();
                     
-                    // Freno de emergencia por si el PDF no tiene la hora completa y empieza otra etiqueta
                     if (nextLine.includes("No. Certificado") || nextLine.includes("Sello digital")) break;
 
-                    // Si el pedazo huérfano empieza con ":", lo unimos SIN espacio para reconstruir la hora
                     if (nextLine.startsWith(":")) {
                         fullFecha += nextLine;
                     } else {
@@ -129,7 +144,7 @@ app.post('/generar-titulo', upload.fields([
 
         const limpiar = (str) => str ? str.replace(/\s{2,}/g, ' ').trim() : "";
 
-        // 3. MAPEO DE DATOS (Manejo de múltiples ":")
+        // 3. MAPEO DE DATOS (Aplicando el formato textual a las fechas requeridas)
         let datosExtraidos = {};
         if (lines.length > 7) {
             const lCarrera = lines[3].split(/\s{2,}/);
@@ -144,13 +159,13 @@ app.post('/generar-titulo', upload.fields([
                 "Carrera": limpiar(lCarrera[0] || ""),
                 "ClaveCarrera": limpiar(lCarrera[1] || ""),
                 "Fechas Inicio": lFechas[0] || "",
-                "Fechas Fin": lFechas[1] || "",
-                "Fechas Examen": lFechas[2] || "",
+                "Fechas Fin": formatearFecha(lFechas[1]),          // <-- Aplicado aquí
+                "Fechas Examen": formatearFecha(lFechas[2]),       // <-- Aplicado aquí
                 "Institución": limpiar(lines[5]),
                 "ClaveInst": lClaves[0] || "",
                 "Autorización": lClaves[1] || "",
                 "Entidad": lEntidad[0] || "",
-                "Fecha de Expedición": lEntidad[1] || ""
+                "Fecha de Expedición": formatearFecha(lEntidad[1]) // <-- Aplicado aquí
             };
 
             lines.forEach((linea) => {
@@ -162,9 +177,7 @@ app.post('/generar-titulo', upload.fields([
                 ];
 
                 etiquetas.forEach(etiq => {
-                    // Usamos startsWith para asegurar que agarramos la etiqueta correcta como inicio de línea
                     if (linea.startsWith(etiq)) {
-                        // Extraemos todo el texto después del primer ":" 
                         const indexDosPuntos = linea.indexOf(":");
                         if (indexDosPuntos !== -1) {
                             const valor = linea.substring(indexDosPuntos + 1).trim();
@@ -174,44 +187,25 @@ app.post('/generar-titulo', upload.fields([
                 });
             });
         }
-        // 4. QR Y DOCX
-        const pdfImgConv = await pdf(pdfEntradaPath, { scale: 4 });
-        for await (const imagen of pdfImgConv) {
-            fs.writeFileSync(imagenTempQR, imagen);
-            break; 
-        }
-        const imgParaQR = await Jimp.read(imagenTempQR);
-        const qrLeido = jsQR(new Uint8ClampedArray(imgParaQR.bitmap.data), imgParaQR.bitmap.width, imgParaQR.bitmap.height);
-        
+
+        // 4. LLENADO DEL DOCX
         const zip = new PizZip(fs.readFileSync(plantillaPath, 'binary'));
         const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
         doc.render(datosExtraidos);
         fs.writeFileSync(tempDocxPath, doc.getZip().generate({ type: 'nodebuffer' }));
 
-        const pdfGeneradoPath = await convertToPdf(tempDocxPath, outputDir);
-
-        // 5. ESTAMPADO FINAL
-        const pdfBytes = fs.readFileSync(pdfGeneradoPath);
-        const pdfDocFinal = await PDFDocument.load(pdfBytes);
-        const qrBuffer = await QRCode.toBuffer(qrLeido?.data || "Error", { margin: 1, errorCorrectionLevel: 'H' });
-        const qrImage = await pdfDocFinal.embedPng(qrBuffer);
-        
-        const { height: pageHeight } = pdfDocFinal.getPages()[0].getSize();
-        pdfDocFinal.getPages()[0].drawImage(qrImage, {
-            x: 301 / 4,
-            y: pageHeight - (2216 / 4) - ((2032 - 1616) / 4),
-            width: (695 - 308) / 4,
-            height: (2032 - 1616) / 4,
-        });
+        // 5. CONVERSIÓN A PDF Y ENVÍO DIRECTO
+        pdfGeneradoPath = await convertToPdf(tempDocxPath, outputDir);
 
         res.setHeader('Content-Type', 'application/pdf');
-        res.send(Buffer.from(await pdfDocFinal.save()));
+        res.send(fs.readFileSync(pdfGeneradoPath));
 
     } catch (error) {
         console.error("ERROR:", error.message);
         res.status(500).send('Error procesando el documento.');
     } finally {
-        [pdfEntradaPath, plantillaPath, tempDocxPath, imagenTempQR].forEach(p => {
+        // Limpieza robusta de los archivos temporales generados
+        [pdfEntradaPath, plantillaPath, tempDocxPath, pdfGeneradoPath].forEach(p => {
             if (p && fs.existsSync(p)) fs.unlinkSync(p);
         });
     }
