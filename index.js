@@ -23,16 +23,27 @@ const upload = multer({ dest: os.tmpdir() });
 // 1. CONVERSIÓN MEJORADA (Protección contra bloqueos y perfiles)
 const convertToPdf = async (inputPath, outputDir) => {
     const isWindows = process.platform === "win32";
-    // Agregamos un entorno de instalación temporal para evitar conflictos si LibreOffice está abierto
+    
+    // Definimos la ruta del ejecutable según el sistema
+    // En la Raspi, el binario suele estar en /lib/libreoffice/program/soffice
+    const libreOfficePath = isWindows 
+        ? `"C:\\Program Files\\LibreOffice\\program\\soffice.exe"` 
+        : "/usr/bin/libreoffice"; // O la ruta directa: "/lib/libreoffice/program/soffice"
+
+    // Nota: Si '/usr/bin/libreoffice' no funciona, cámbialo por '/lib/libreoffice/program/soffice'
+    
     const command = isWindows 
-        ? `"C:\\Program Files\\LibreOffice\\program\\soffice.exe" --headless "-env:UserInstallation=file:///${os.tmpdir().replace(/\\/g, '/')}/libre_profile_${Date.now()}" --convert-to pdf "${inputPath}" --outdir "${outputDir}"`
-        : `libreoffice --headless --convert-to pdf "${inputPath}" --outdir "${outputDir}"`;
+        ? `${libreOfficePath} --headless "-env:UserInstallation=file:///${os.tmpdir().replace(/\\/g, '/')}/libre_profile_${Date.now()}" --convert-to pdf "${inputPath}" --outdir "${outputDir}"`
+        : `${libreOfficePath} --headless --convert-to pdf "${inputPath}" --outdir "${outputDir}"`;
 
     try {
         await execPromise(command);
         const nombreArchivo = path.parse(inputPath).name + ".pdf";
         const finalPath = path.resolve(outputDir, nombreArchivo);
-        if (!fs.existsSync(finalPath)) throw new Error("El PDF no se generó.");
+        
+        if (!fs.existsSync(finalPath)) {
+            throw new Error("El PDF no se generó. Revisa permisos en la carpeta temporal.");
+        }
         return finalPath;
     } catch (err) {
         throw new Error(`Fallo en LibreOffice: ${err.message}`);
