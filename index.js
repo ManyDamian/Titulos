@@ -172,7 +172,8 @@ app.post('/generar-titulo', upload.fields([
                 "ClaveInst": lClaves[0] || "",
                 "Autorización": lClaves[1] || "",
                 "Entidad": lEntidad[0] || "",
-                "Fecha de Expedición": formatearFecha(lEntidad[1]) // Aplicado
+                "Fecha de Expedición": formatearFecha(lEntidad[1]), // Aplicado
+				"modo titulacion": req.body.modo_titulacion || "EL EXAMEN PROFESIONAL"
             };
 
             lines.forEach((linea) => {
