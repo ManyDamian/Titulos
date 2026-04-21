@@ -48,6 +48,17 @@ const formatearFecha = (fechaStr) => {
     return fechaStr;
 };
 
+// --- NUEVA FUNCIÓN PARA CAMBIAR EL GRADO ACADÉMICO ---
+const formatearGrado = (gradoStr) => {
+    if (!gradoStr) return "";
+    
+    // Reemplaza las palabras clave conservando el resto del texto (ej. " EN DERECHO")
+    return gradoStr
+        .replace(/LICENCIATURA/gi, "LICENCIADO")
+        .replace(/MAESTR[IÍ]A/gi, "MAESTRO")
+        .replace(/DOCTORADO/gi, "DOCTOR");
+};
+
 // 1. CONVERSIÓN MEJORADA (Rutas ajustadas para Raspberry Pi)
 const convertToPdf = async (inputPath, outputDir) => {
     const isWindows = process.platform === "win32";
@@ -163,7 +174,7 @@ app.post('/generar-titulo', upload.fields([
                 "Folio": lines[0],
                 "CURP": lines[1],
                 "Nombre del Profesionista": limpiar(lines[2]),
-                "Carrera": limpiar(lCarrera[0] || ""),
+                "Carrera": formatearGrado(limpiar(lCarrera[0] || "")),
                 "ClaveCarrera": limpiar(lCarrera[1] || ""),
                 "Fechas Inicio": lFechas[0] || "",
                 "Fechas Fin": formatearFecha(lFechas[1]),          // Aplicado
