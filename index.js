@@ -163,29 +163,32 @@ app.post('/generar-titulo', upload.fields([
         const limpiar = (str) => str ? str.replace(/\s{2,}/g, ' ').trim() : "";
 
         // 3. MAPEO DE DATOS (Aplicando el formato textual a las fechas requeridas)
-        let datosExtraidos = {};
-        if (lines.length > 7) {
-            const lCarrera = lines[3].split(/\s{2,}/);
-            const lFechas = lines[4].split(/\s{2,}/);
-            const lClaves = lines[6].split(/\s{2,}/);
-            const lEntidad = lines[7].split(/\s{2,}/);
+            let datosExtraidos = {};
+            if (lines.length > 7) {
+                const lCarrera = lines[3].split(/\s{2,}/);
+                const lFechas = lines[4].split(/\s{2,}/);
+                const lClaves = lines[6].split(/\s{2,}/);
+                const lEntidad = lines[7].split(/\s{2,}/);
 
-            datosExtraidos = {
-                "Folio": lines[0],
-                "CURP": lines[1],
-                "Nombre del Profesionista": limpiar(lines[2]),
-                "Carrera": formatearGrado(limpiar(lCarrera[0] || "")),
-                "ClaveCarrera": limpiar(lCarrera[1] || ""),
-                "Fechas Inicio": lFechas[0] || "",
-                "Fechas Fin": formatearFecha(lFechas[1]),          // Aplicado
-                "Fechas Examen": formatearFecha(lFechas[2]),       // Aplicado
-                "Institución": limpiar(lines[5]),
-                "ClaveInst": lClaves[0] || "",
-                "Autorización": lClaves[1] || "",
-                "Entidad": lEntidad[0] || "",
-                "Fecha de Expedición": formatearFecha(lEntidad[1]), // Aplicado
-				"modo titulacion": req.body.modo_titulacion || "EL EXAMEN PROFESIONAL"
-            };
+                datosExtraidos = {
+                    "Folio": lines[0],
+                    "CURP": lines[1],
+                    "Nombre del Profesionista": limpiar(lines[2]),
+                    "Carrera": formatearGrado(limpiar(lCarrera[0] || "")),
+                    "ClaveCarrera": limpiar(lCarrera[1] || ""),
+                    "Fechas Inicio": lFechas[0] || "",
+                    "Fechas Fin": formatearFecha(lFechas[1]),          // Aplicado
+                    
+                    // --- AQUI AGREGAMOS .toUpperCase() ---
+                    "Fechas Examen": formatearFecha(lFechas[2]).toUpperCase(),       
+                    
+                    "Institución": limpiar(lines[5]),
+                    "ClaveInst": lClaves[0] || "",
+                    "Autorización": lClaves[1] || "",
+                    "Entidad": lEntidad[0] || "",
+                    "Fecha de Expedición": formatearFecha(lEntidad[1]), // Aplicado
+                    "modo titulacion": req.body.modo_titulacion || "EL EXAMEN PROFESIONAL"
+                };
 
             lines.forEach((linea) => {
                 const etiquetas = [
