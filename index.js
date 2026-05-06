@@ -174,7 +174,8 @@ app.post('/generar-titulo', upload.fields([
                     "Folio": lines[0],
                     "CURP": lines[1],
                     "Nombre del Profesionista": limpiar(lines[2]),
-                    "Carrera": formatearGrado(limpiar(lCarrera[0] || "")),
+                    "Carrera1": formatearGrado(limpiar(lCarrera[0] || "")), // Ej: LICENCIADO EN DERECHO
+                    "Carrera2": limpiar(lCarrera[0] || ""),                 // Ej: LICENCIATURA EN DERECHO
                     "ClaveCarrera": limpiar(lCarrera[1] || ""),
                     "Fechas Inicio": lFechas[0] || "",
                     "Fechas Fin": formatearFecha(lFechas[1]),          // Aplicado
